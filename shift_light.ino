@@ -12,13 +12,14 @@
 #define LED_PIN     27
 #define SPARK_INPUT_PIN 35
 #define NUM_LEDS    12
-#define BRIGHTNESS  64
+#define BRIGHTNESS  255
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
 CRGB leds[NUM_LEDS];
 
 #define UPDATES_PER_SECOND 100
 
+#define START_RPM 8000.0
 #define REDLINE 16000.0
 
 // This example shows several ways to set up and use 'palettes' of colors
@@ -179,17 +180,36 @@ void loop()
 
 void FillLEDs()
 {
-    uint8_t brightness = 255;
-    uint8_t colorIndex = 0;
+    uint8_t brightness = 64;
+    
+    float correctedRpm = averageRpm - START_RPM;
+    float correctedRedline = REDLINE - START_RPM;
     float index = 0.0;
+    
+    // SHIFT LIGHT
+    if (correctedRpm > correctedRedline) {
+      for( uint8_t i = 9; i < NUM_LEDS; i++) {
+        leds[i] = ColorFromPalette( currentPalette, i * 16, BRIGHTNESS, NOBLEND);
+      }
+      return;
+    }
+
+    // TACHOMETER
     for( uint8_t i = 0; i < NUM_LEDS; i++) {
-        if ((averageRpm / REDLINE) > (index / NUM_LEDS)) {
-          leds[i] = ColorFromPalette( currentPalette, colorIndex, brightness, LINEARBLEND);
+        if ((correctedRpm / correctedRedline) > (index / NUM_LEDS)) {
+          if ((correctedRpm / correctedRedline) > ((index + 1) / NUM_LEDS)) {
+            // dimly illuminate all LEDs below current tach position
+            leds[i] = ColorFromPalette( currentPalette, i * 16, 2, NOBLEND);     
+          }
+          else {
+            // set current tach position to full brightness
+            leds[i] = ColorFromPalette( currentPalette, i * 16, brightness, NOBLEND);
+          }
         } else {
+          // Beyond the current tach position, turn off led
           leds[i] = CRGB::Black;          
         }
-        index += 1;
-        colorIndex += 16;
+        index++;
     }
 }
 
