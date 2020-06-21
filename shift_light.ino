@@ -188,8 +188,14 @@ void FillLEDs()
     
     // SHIFT LIGHT
     if (correctedRpm > correctedRedline) {
-      for( uint8_t i = 9; i < NUM_LEDS; i++) {
-        leds[i] = ColorFromPalette( currentPalette, i * 16, BRIGHTNESS, NOBLEND);
+      if ((millis() % 200) > 50) {
+        for( uint8_t i = 0; i < NUM_LEDS; i++) {
+          leds[i] = CRGB::Red;
+        }
+      } else {
+        for( uint8_t i = 0; i < NUM_LEDS; i++) {
+          leds[i] = CRGB::White;
+        }        
       }
       return;
     }
@@ -199,7 +205,7 @@ void FillLEDs()
         if ((correctedRpm / correctedRedline) > (index / NUM_LEDS)) {
           if ((correctedRpm / correctedRedline) > ((index + 1) / NUM_LEDS)) {
             // dimly illuminate all LEDs below current tach position
-            leds[i] = ColorFromPalette( currentPalette, i * 16, 2, NOBLEND);     
+            leds[i] = ColorFromPalette( currentPalette, i * 16, 2, NOBLEND);
           }
           else {
             // set current tach position to full brightness
