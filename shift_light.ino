@@ -3,11 +3,6 @@
 #include <iostream> 
 #include <unordered_map> 
 
-#include "src/test.pb.h"
-#include "pb_common.h"
-#include "pb.h"
-#include "pb_encode.h"
-#include "pb_decode.h"
 
 #define LED_PIN     27
 #define SPARK_INPUT_PIN 35
@@ -19,8 +14,9 @@ CRGB leds[NUM_LEDS];
 
 #define UPDATES_PER_SECOND 100
 
-#define START_RPM 8000.0
-#define REDLINE 16000.0
+#define START_RPM 500.0
+#define REDLINE 5000.0
+int ANALOG_THRESHOLD = 128;
 
 // This example shows several ways to set up and use 'palettes' of colors
 // with FastLED.
@@ -47,8 +43,6 @@ TBlendType    currentBlending;
 extern CRGBPalette16 myRedWhiteBluePalette;
 extern const TProgmemPalette16 myRedWhiteBluePalette_p PROGMEM;
 
-BluetoothSerial SerialBT;
-
 String serialBuffer;
 CRGB outColor = CHSV( HUE_GREEN, 255, 255);
 std::unordered_map<char*, int> colorMap;
@@ -59,7 +53,6 @@ void setup() {
   
     Serial.begin(9600);           //  setup serial
     Serial.println("Starting...");
-    SerialBT.begin("ESP32test"); //Bluetooth device name
 
     
     delay( 1000 ); // power-up safety delay
@@ -74,6 +67,7 @@ void setup() {
     colorMap["red"] = 3;
 }
 
+
 int val = 0;
 int count = 0.0;
 uint32_t lastUpdate = micros();
@@ -83,60 +77,74 @@ float rpm = 0.0;
 float averageRpm = 0.0;
 uint32_t lastTrigger = 0;
 uint32_t lastLEDUpdate = 0;
-int isLow = true;
 int currentTriggerState = 0;
 
 uint8_t btBuffer[256];
 uint8_t btThisChar;
 int bufferIndex;
-pb_istream_t stream;
-tutorial_Person_PhoneNumber phoneNumber;
 
-bool decode_string(pb_istream_t *stream, const pb_field_t *field, void **arg)
+int previousReadings[16] = {};
+int previousReadingsSize = 0;
+int group1Sum = 0;
+float group1Avg;
+int group2Sum = 0;
+float group2Avg;
+boolean detectEdge()
 {
-    printf("decode_string...\n");
-
-   uint8_t buffer[1024] = {0};
-//    char buffer[1024] = {0};
-
-
-    /* We could read block-by-block to avoid the large buffer... */
-    if (stream->bytes_left > sizeof(buffer) - 1)
-        return false;
-
-    if (!pb_read(stream, buffer, stream->bytes_left))
-        return false;
-
-    /* Print the string, in format comparable with protoc --decode.
-     * Format comes from the arg defined in main().
-     */
-     //printf((char*)*arg, buffer);
-    Serial.println((char*)buffer);
-    return true;
+  // roll forward all past readings
+  for(int i = 15; i > 0; i--)
+  {
+    previousReadings[i] = previousReadings[i - 1];
+  }
+  // set latest reading
+  previousReadings[0] = currentTriggerState;
+  if (previousReadingsSize < 16) {
+    previousReadingsSize++;
+  }
+  if (previousReadingsSize > 15) { // this condition basically also debounces for us
+    group1Sum = 0;
+    group2Sum = 0;
+    for(int i = 0; i < 5; i++)
+    {
+      group1Sum += previousReadings[i];
+    }
+    for(int i = 5; i < 15; i++)
+    {
+      group2Sum += previousReadings[i];
+    }
+    group1Avg = group1Sum / 5.0;
+    group2Avg = group2Sum / 10.0;
+  
+    if (group1Avg < ANALOG_THRESHOLD && group2Avg > ANALOG_THRESHOLD) {
+      // reset
+      previousReadingsSize = 0;
+      return true;
+    }
+  }
+  return false;
 }
 
 
+boolean edgeDetected;
 void loop()
 {
     now = micros();
     if (now - lastUpdate > 1000000) {
-      Serial.print(averageRpm);Serial.println("RPM");
-      Serial.print(count);Serial.println("Hz");
+//      Serial.print(averageRpm);Serial.println("RPM");
+//      Serial.print(count);Serial.println("Hz");Serial.println("");
+     
       lastUpdate = now;
       count = 0;
     }
     count++;
 
-    currentTriggerState = analogRead(SPARK_INPUT_PIN);
-    if (isLow && currentTriggerState > 500) {
-      rpm = (60.0 * 1000000.0) / (now - lastTrigger);
-      
-      averageRpm = (0.8 * rpm) + (0.2 * rpm);
+    currentTriggerState = (int)analogRead(SPARK_INPUT_PIN);
+    edgeDetected = detectEdge();
+    if (edgeDetected) {
+      // 2 revolutions per spark, 60 seconds per minute, 1,000,000 micros per second
+      rpm = (2.0 * 60.0 * 1000000.0) / (now - lastTrigger); 
+      averageRpm = (0.5 * averageRpm) + (0.5 * rpm);
       lastTrigger = now;
-      isLow = false;
-    }
-    if (!isLow && currentTriggerState < 500) {
-      isLow = true;
     }
          
     static uint8_t startIndex = 0;
@@ -145,21 +153,6 @@ void loop()
       FillLEDs();
       FastLED.show();
       lastLEDUpdate = now;
-
-      bufferIndex = 0;
-      while (SerialBT.available()) {
-        btBuffer[bufferIndex] = SerialBT.read();
-        bufferIndex++;
-      }
-      if (bufferIndex > 0) {    
-        stream = pb_istream_from_buffer(btBuffer, sizeof(btBuffer));
-        phoneNumber = tutorial_Person_PhoneNumber_init_default;
-        phoneNumber.number.funcs.decode = &decode_string;
-        
-        pb_decode(&stream, tutorial_Person_PhoneNumber_fields, &phoneNumber);
-        //Serial.println(btBuffer);
-        bufferIndex = 0;
-      }
       
       //Serial.write(SerialBT.read());Serial.println();
 //        switch (selectedColor)
